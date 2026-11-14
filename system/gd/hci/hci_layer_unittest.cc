@@ -494,5 +494,48 @@ TEST_F(HciLayerTest, command_status_callback_is_invoked_with_failure_status) {
   sync_handler();
 }
 
+// Injects a Command Complete for READ_CLOCK_OFFSET, which waits for Command Status, and returns
+// the Command Status its callback receives.
+static CommandStatusView command_status_for_command_complete(
+    HciLayer* hci, os::Handler* handler, hal::TestHciHal* hal, ErrorCode complete_status,
+    std::function<void()> sync) {
+  std::promise<CommandStatusView> promise;
+  auto future = promise.get_future();
+  hci->EnqueueCommand(
+      ReadClockOffsetBuilder::Create(0x001),
+      handler->BindOnce(
+          [](std::promise<CommandStatusView>* promise, CommandStatusView view) {
+            promise->set_value(view);
+          },
+          &promise));
+  hal->InjectEvent(CommandCompleteBuilder::Create(
+      1,
+      OpCode::READ_CLOCK_OFFSET,
+      std::make_unique<packet::RawBuilder>(
+          std::vector<uint8_t>{static_cast<uint8_t>(complete_status)})));
+  sync();
+  EXPECT_EQ(std::future_status::ready, future.wait_for(std::chrono::seconds(1)));
+  return future.get();
+}
+
+TEST_F(HciLayerTest, command_status_callback_is_invoked_for_command_complete_with_error) {
+  FailIfResetNotSent();
+  hal_->InjectEvent(ResetCompleteBuilder::Create(1, ErrorCode::SUCCESS));
+  auto view = command_status_for_command_complete(
+      hci_, hci_handler_, hal_, ErrorCode::COMMAND_DISALLOWED, [this] { sync_handler(); });
+  ASSERT_TRUE(view.IsValid());
+  ASSERT_EQ(OpCode::READ_CLOCK_OFFSET, view.GetCommandOpCode());
+  ASSERT_EQ(ErrorCode::COMMAND_DISALLOWED, view.GetStatus());
+}
+
+TEST_F(HciLayerTest, command_status_callback_is_invoked_for_command_complete_with_success) {
+  FailIfResetNotSent();
+  hal_->InjectEvent(ResetCompleteBuilder::Create(1, ErrorCode::SUCCESS));
+  auto view = command_status_for_command_complete(
+      hci_, hci_handler_, hal_, ErrorCode::SUCCESS, [this] { sync_handler(); });
+  ASSERT_TRUE(view.IsValid());
+  ASSERT_EQ(ErrorCode::UNSPECIFIED_ERROR, view.GetStatus());
+}
+
 }  // namespace hci
 }  // namespace bluetooth

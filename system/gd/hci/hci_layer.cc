@@ -30,6 +30,7 @@
 #include "os/queue.h"
 #include "osi/include/stack_power_telemetry.h"
 #include "packet/packet_builder.h"
+#include "packet/raw_builder.h"
 #include "storage/storage_module.h"
 
 namespace bluetooth {
@@ -220,6 +221,32 @@ struct HciLayer::impl {
     } else {
       if (command_queue_.front().waiting_for_status_ == is_status) {
         command_queue_.front().GetCallback<TResponse>()->Invoke(std::move(response_view));
+      } else if (command_queue_.front().waiting_for_status_) {
+        // Some controllers reject a command that is answered with Command Status (e.g. LE
+        // Extended Create Connection on a WCN3990) by a Command Complete event carrying the
+        // error code. Pass that code on as a Command Status: the Command Complete callback of
+        // such a command is empty. SUCCESS would mean "pending" in a Command Status, and the
+        // completion event it promises will not come, so report it as an error.
+        CommandCompleteView complete_view = CommandCompleteView::Create(event);
+        ErrorCode status = ErrorCode::UNKNOWN_HCI_COMMAND;
+        if (complete_view.IsValid() && complete_view.GetPayload().size() > 0) {
+          status = static_cast<ErrorCode>(complete_view.GetPayload()[0]);
+        }
+        if (status == ErrorCode::SUCCESS) {
+          status = ErrorCode::UNSPECIFIED_ERROR;
+        }
+        LOG_WARN(
+            "Command Complete for 0x%02hx (%s), which expects Command Status: status %s",
+            op_code,
+            OpCodeText(op_code).c_str(),
+            ErrorCodeText(status).c_str());
+        auto bytes = std::make_shared<std::vector<uint8_t>>();
+        BitInserter bi(*bytes);
+        CommandStatusBuilder::Create(
+            status, command_credits_, op_code, std::make_unique<packet::RawBuilder>())
+            ->Serialize(bi);
+        command_queue_.front().GetCallback<CommandStatusView>()->Invoke(
+            CommandStatusView::Create(EventView::Create(PacketView<kLittleEndian>(bytes))));
       } else {
         CommandCompleteView command_complete_view = CommandCompleteView::Create(
             EventView::Create(PacketView<kLittleEndian>(std::make_shared<std::vector<uint8_t>>(std::vector<uint8_t>()))));
