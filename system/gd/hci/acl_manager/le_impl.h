@@ -839,7 +839,11 @@ struct le_impl : public bluetooth::hci::LeAddressManagerCallback {
       address_with_type = AddressWithType();
     }
 
-    if (controller_->IsSupported(OpCode::LE_EXTENDED_CREATE_CONNECTION)) {
+    // Some controllers (e.g. Qualcomm WCN3990 with HCI 4.2 firmware) set the supported-command
+    // bit for LE Extended Create Connection but reject it with Unknown HCI Command in a Command
+    // Complete event. Require the LE Extended Advertising feature too, as le_scanning_manager does.
+    if (controller_->IsSupported(OpCode::LE_EXTENDED_CREATE_CONNECTION) &&
+        controller_->SupportsBleExtendedAdvertising()) {
       bool only_init_1m_phy = os::GetSystemPropertyBool(kPropertyEnableBleOnlyInit1mPhy, kEnableBleOnlyInit1mPhy);
 
       uint8_t initiating_phys = PHY_LE_1M;

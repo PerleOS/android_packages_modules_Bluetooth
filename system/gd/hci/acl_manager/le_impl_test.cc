@@ -178,6 +178,14 @@ class TestController : public Controller {
     supported_opcodes_.insert(op_code);
   }
 
+  bool SupportsBleExtendedAdvertising() const override {
+    return supports_ble_extended_advertising_;
+  }
+
+  void SetSupportsBleExtendedAdvertising(bool supported) {
+    supports_ble_extended_advertising_ = supported;
+  }
+
   uint16_t GetNumAclPacketBuffers() const {
     return max_acl_packet_credits_;
   }
@@ -219,6 +227,7 @@ class TestController : public Controller {
  private:
   CompletedAclPacketsCallback acl_credits_callback_;
   std::set<OpCode> supported_opcodes_{};
+  bool supports_ble_extended_advertising_{false};
 };
 
 }  // namespace
@@ -540,6 +549,7 @@ TEST_F(LeImplTest, enhanced_connection_complete_with_periperal_role) {
   set_random_device_address_policy();
 
   controller_->AddSupported(OpCode::LE_EXTENDED_CREATE_CONNECTION);
+  controller_->SetSupportsBleExtendedAdvertising(true);
   // Create connection
   le_impl_->create_le_connection(
       {{0x21, 0x22, 0x23, 0x24, 0x25, 0x26}, AddressType::PUBLIC_DEVICE_ADDRESS}, true, false);
@@ -553,6 +563,10 @@ TEST_F(LeImplTest, enhanced_connection_complete_with_periperal_role) {
 
   // Check state is ARMED
   ASSERT_EQ(ConnectabilityState::ARMED, le_impl_->connectability_state_);
+
+  // With extended advertising, a peripheral connection waits for the advertising set
+  // terminated event; this test covers the connection complete path without it.
+  controller_->SetSupportsBleExtendedAdvertising(false);
 
   // Receive connection complete of incoming connection (Role::PERIPHERAL)
   hci::Address remote_address;
@@ -617,6 +631,7 @@ TEST_F(LeImplTest, enhanced_connection_complete_with_central_role) {
   set_random_device_address_policy();
 
   controller_->AddSupported(OpCode::LE_EXTENDED_CREATE_CONNECTION);
+  controller_->SetSupportsBleExtendedAdvertising(true);
   hci::Address remote_address;
   Address::FromString("D0:05:04:03:02:01", remote_address);
   hci::AddressWithType address_with_type(remote_address, hci::AddressType::PUBLIC_DEVICE_ADDRESS);
