@@ -181,6 +181,14 @@ public:
     supported_opcodes_.insert(op_code);
   }
 
+  bool SupportsBleExtendedAdvertising() const override {
+    return supports_ble_extended_advertising_;
+  }
+
+  void SetSupportsBleExtendedAdvertising(bool supported) {
+    supports_ble_extended_advertising_ = supported;
+  }
+
   uint16_t GetNumAclPacketBuffers() const { return max_acl_packet_credits_; }
 
   uint16_t GetAclPacketLength() const { return hci_mtu_; }
@@ -214,6 +222,7 @@ public:
 private:
   CompletedAclPacketsCallback acl_credits_callback_;
   std::set<OpCode> supported_opcodes_{};
+  bool supports_ble_extended_advertising_{false};
 };
 
 }  // namespace
@@ -574,6 +583,7 @@ TEST_F(LeImplTest, enhanced_connection_complete_with_periperal_role) {
   set_random_device_address_policy();
 
   controller_->AddSupported(OpCode::LE_EXTENDED_CREATE_CONNECTION);
+  controller_->SetSupportsBleExtendedAdvertising(true);
   // Create connection
   le_impl_->create_le_connection(
           {{0x21, 0x22, 0x23, 0x24, 0x25, 0x26}, AddressType::PUBLIC_DEVICE_ADDRESS}, true, false,
@@ -588,6 +598,10 @@ TEST_F(LeImplTest, enhanced_connection_complete_with_periperal_role) {
 
   // Check state is ARMED
   ASSERT_EQ(ConnectabilityState::ARMED, le_impl_->connectability_state_);
+
+  // With extended advertising, a peripheral connection waits for the advertising set
+  // terminated event; this test covers the connection complete path without it.
+  controller_->SetSupportsBleExtendedAdvertising(false);
 
   // Receive connection complete of incoming connection (Role::PERIPHERAL)
   hci::Address remote_address = Address::FromString("D0:05:04:03:02:01").value();
@@ -677,6 +691,7 @@ TEST_F(LeImplTest, enhanced_connection_complete_with_central_role) {
   set_random_device_address_policy();
 
   controller_->AddSupported(OpCode::LE_EXTENDED_CREATE_CONNECTION);
+  controller_->SetSupportsBleExtendedAdvertising(true);
   hci::Address remote_address = Address::FromString("D0:05:04:03:02:01").value();
   hci::AddressWithType address_with_type(remote_address, hci::AddressType::PUBLIC_DEVICE_ADDRESS);
   // Create connection
@@ -711,6 +726,7 @@ TEST_F(LeImplTest, enhanced_connection_complete_with_central_role__ADDRESS_ROTAT
   set_resolvable_address_policy();
 
   controller_->AddSupported(OpCode::LE_EXTENDED_CREATE_CONNECTION);
+  controller_->SetSupportsBleExtendedAdvertising(true);
   hci::Address remote_address = Address::FromString("D0:05:04:03:02:01").value();
   hci::AddressWithType remote_address_with_type(remote_address,
                                                 hci::AddressType::PUBLIC_DEVICE_ADDRESS);
@@ -757,6 +773,7 @@ TEST_F(LeImplTest, aggressive_connection_mode_selected_when_no_ongoing_le_connec
 
   set_random_device_address_policy();
   controller_->AddSupported(OpCode::LE_EXTENDED_CREATE_CONNECTION);
+  controller_->SetSupportsBleExtendedAdvertising(true);
 
   LeExtendedCreateConnectionView view = get_view_from_creating_connection("FF:EE:DD:CC:BB:AA");
 
@@ -774,6 +791,7 @@ TEST_F(LeImplTest, aggressive_connection_mode_selected_when_few_le_connections_e
 
   set_random_device_address_policy();
   controller_->AddSupported(OpCode::LE_EXTENDED_CREATE_CONNECTION);
+  controller_->SetSupportsBleExtendedAdvertising(true);
 
   std::vector<std::unique_ptr<LeAclConnection>> connections;
   for (uint32_t i = 0; i < LeConnectionParameters::GetAggressiveConnThreshold() - 1; i++) {
@@ -805,6 +823,7 @@ TEST_F(LeImplTest,
 
   set_random_device_address_policy();
   controller_->AddSupported(OpCode::LE_EXTENDED_CREATE_CONNECTION);
+  controller_->SetSupportsBleExtendedAdvertising(true);
 
   LeExtendedCreateConnectionView view = get_view_from_creating_connection("FF:EE:DD:CC:BB:AA");
 
@@ -818,6 +837,7 @@ TEST_F(LeImplTest,
 TEST_F(LeImplTest, relaxed_connection_mode_selected_when_enough_le_connections_exist) {
   set_random_device_address_policy();
   controller_->AddSupported(OpCode::LE_EXTENDED_CREATE_CONNECTION);
+  controller_->SetSupportsBleExtendedAdvertising(true);
 
   std::vector<std::unique_ptr<LeAclConnection>> connections;
   for (uint32_t i = 0; i < LeConnectionParameters::GetAggressiveConnThreshold(); i++) {
@@ -1688,6 +1708,7 @@ TEST_F(LeImplTest, direct_connection_after_direct_connection) {
 TEST_F(LeImplTest, direct_connection_cancel_but_connected) {
   set_random_device_address_policy();
   controller_->AddSupported(OpCode::LE_EXTENDED_CREATE_CONNECTION);
+  controller_->SetSupportsBleExtendedAdvertising(true);
 
   hci::AddressWithType address({0x21, 0x22, 0x23, 0x24, 0x25, 0x26},
                                AddressType::PUBLIC_DEVICE_ADDRESS);
