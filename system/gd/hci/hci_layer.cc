@@ -279,6 +279,32 @@ struct HciLayer::impl {
       log::assert_that(command_complete_view.IsValid(),
                        "assert failed: command_complete_view.IsValid()");
       (*command_queue_.front().GetCallback<CommandCompleteView>())(command_complete_view);
+    } else if (waiting_for == WaitingFor::STATUS && !is_status) {
+      // Some controllers reject a command that is answered with Command Status (e.g. LE
+      // Extended Create Connection on a WCN3990) by a Command Complete event carrying the
+      // error code. Pass that code on as a Command Status: the Command Complete callback of
+      // such a command is empty. SUCCESS would mean "pending" in a Command Status, and the
+      // completion event it promises will not come, so report it as an error.
+      CommandCompleteView complete_view = CommandCompleteView::Create(event);
+      ErrorCode status = ErrorCode::UNKNOWN_HCI_COMMAND;
+      uint8_t num_packets = 1;
+      if (complete_view.IsValid()) {
+        num_packets = complete_view.GetNumHciCommandPackets();
+        if (complete_view.GetPayload().size() > 0) {
+          status = static_cast<ErrorCode>(complete_view.GetPayload()[0]);
+        }
+      }
+      if (status == ErrorCode::SUCCESS) {
+        status = ErrorCode::UNSPECIFIED_ERROR;
+      }
+      log::warn("Command Complete for {}, which expects Command Status: status {}",
+                OpCodeText(op_code), ErrorCodeText(status));
+      auto status_event = std::make_shared<std::vector<std::uint8_t>>(
+              CommandStatusBuilder::Create(status, num_packets, op_code,
+                                           std::make_unique<packet::RawBuilder>())
+                      ->SerializeToBytes());
+      (*command_queue_.front().GetCallback<CommandStatusView>())(CommandStatusView::Create(
+              EventView::Create(PacketView<kLittleEndian>(status_event))));
     } else if (waiting_for != WaitingFor::STATUS_OR_COMPLETE) {
       log::assert_that((waiting_for == WaitingFor::STATUS) == is_status,
                        "{} was not expecting {} event", OpCodeText(op_code), logging_id);
