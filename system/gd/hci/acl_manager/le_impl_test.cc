@@ -579,6 +579,40 @@ TEST_F(LeImplTest, connection_complete_with_periperal_role) {
   ASSERT_EQ(ConnectabilityState::ARMED, le_impl_->connectability_state_);
 }
 
+// Some controllers set the supported-command bit of LE Extended Create Connection without
+// reporting the LE Extended Advertising feature, and reject the command (e.g. Qualcomm WCN3990).
+TEST_F(LeImplTest, create_connection_without_extended_advertising_feature) {
+  set_random_device_address_policy();
+
+  controller_->AddSupported(OpCode::LE_EXTENDED_CREATE_CONNECTION);
+  controller_->SetSupportsBleExtendedAdvertising(false);
+
+  hci::Address remote_address = Address::FromString("D0:05:04:03:02:01").value();
+  hci::AddressWithType address_with_type(remote_address, hci::AddressType::PUBLIC_DEVICE_ADDRESS);
+  // Create connection
+  le_impl_->create_le_connection(address_with_type, true, false, false);
+  hci_layer_->GetCommand(OpCode::LE_ADD_DEVICE_TO_FILTER_ACCEPT_LIST);
+  hci_layer_->IncomingEvent(
+          LeAddDeviceToFilterAcceptListCompleteBuilder::Create(0x01, ErrorCode::SUCCESS));
+  // The legacy command is sent, not LE_EXTENDED_CREATE_CONNECTION
+  ASSERT_EQ(OpCode::LE_CREATE_CONNECTION, hci_layer_->GetCommand().GetOpCode());
+  hci_layer_->IncomingEvent(LeCreateConnectionStatusBuilder::Create(ErrorCode::SUCCESS, 0x01));
+  sync_handler();
+
+  // Check state is ARMED
+  ASSERT_EQ(ConnectabilityState::ARMED, le_impl_->connectability_state_);
+
+  // Receive connection complete of outgoing connection (Role::CENTRAL)
+  EXPECT_CALL(mock_le_connection_callbacks_, OnLeConnectSuccess(address_with_type, _));
+  hci_layer_->IncomingLeMetaEvent(LeConnectionCompleteBuilder::Create(
+          ErrorCode::SUCCESS, 0x0041, Role::CENTRAL, AddressType::PUBLIC_DEVICE_ADDRESS,
+          remote_address, 0x0024, 0x0000, 0x0011, ClockAccuracy::PPM_30));
+  sync_handler();
+
+  // Check state is DISARMED
+  ASSERT_EQ(ConnectabilityState::DISARMED, le_impl_->connectability_state_);
+}
+
 TEST_F(LeImplTest, enhanced_connection_complete_with_periperal_role) {
   set_random_device_address_policy();
 
